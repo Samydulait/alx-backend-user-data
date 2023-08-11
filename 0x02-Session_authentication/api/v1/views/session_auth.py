@@ -1,43 +1,76 @@
 #!/usr/bin/env python3
-""" Module of Users views
 """
-import os
-from api.v1.views import app_views
+Module for authentication using Session auth
+"""
+
+
+from .auth import Auth
+
 from models.user import User
-from flask import jsonify, request
+from uuid import uuid4
 
 
-@app_views.route('/auth_session/login', methods=['POST'], strict_slashes=False)
-def session_auth():
+class SessionAuth(Auth):
     """_summary_
     """
-    email = request.form.get('email')
-    password = request.form.get('password')
-    if email is None or email == '':
-        return jsonify({"error": "email missing"}), 400
-    if password is None or password == '':
-        return jsonify({"error": "password missing"}), 400
-    users = User.search({"email": email})
-    if not users or users == []:
-        return jsonify({"error": "no user found for this email"}), 404
-    for user in users:
-        if user.is_valid_password(password):
-            from api.v1.app import auth
-            session_id = auth.create_session(user.id)
-            resp = jsonify(user.to_json())
-            session_name = os.getenv('SESSION_NAME')
-            resp.set_cookie(session_name, session_id)
-            return resp
-    return jsonify({"error": "wrong password"}), 401
+    user_id_by_session_id = {}
 
+    def create_session(self, user_id: str = None) -> str:
+        """_summary_
 
-@app_views.route('/auth_session/logout',
-                 methods=['DELETE'], strict_slashes=False)
-def logout():
-    """
-    for logging out user
-    """
-    from api.v1.app import auth
-    if auth.destroy_session(request):
-        return jsonify({}), 200
-    abort(404)
+        Args:
+            user_id (str, optional): _description_. Defaults to None.
+
+        Returns:
+            str: _description_
+        """
+        if user_id is None or not isinstance(user_id, str):
+            return None
+
+        id = uuid4()
+        self.user_id_by_session_id[str(id)] = user_id
+        return str(id)
+
+    def user_id_for_session_id(self, session_id: str = None) -> str:
+        """_summary_
+
+        Args:
+            session_id (str, optional): _description_. Defaults to None.
+
+        Returns:
+                str: _description_
+        """
+        if session_id is None or not isinstance(session_id, str):
+            return None
+        return self.user_id_by_session_id.get(session_id)
+
+    def current_user(self, request=None):
+        """_summary_
+
+        Args:
+            request (_type_, optional): _description_. Defaults to None.
+        """
+        session_cookie = self.session_cookie(request)
+        user_id = self.user_id_for_session_id(session_cookie)
+        user = User.get(user_id)
+        return user
+
+    def destroy_session(self, request=None):
+        """_summary_
+
+        Args:
+            request (_type_, optional): _description_. Defaults to None.
+
+        Returns:
+            _type_: _description_
+        """
+        if request is None:
+            return False
+        session_cookie = self.session_cookie(request)
+        if session_cookie is None:
+            return False
+        user_id = self.user_id_for_session_id(session_cookie)
+        if user_id is None:
+            return False
+        del self.user_id_by_session_id[session_cookie]
+        return True
